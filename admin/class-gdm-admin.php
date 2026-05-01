@@ -30,9 +30,9 @@ class GDM_Admin {
 
     public function enqueue_assets(): void {
         wp_enqueue_style('gdm-admin', GDM_PLUGIN_URL . 'assets/admin.css', [], GDM_VERSION);
-        
+
         wp_enqueue_script('gdm-admin-js', GDM_PLUGIN_URL . 'assets/admin.js', [], GDM_VERSION, true);
-        
+
         wp_localize_script('gdm-admin-js', 'gdmAjax', [
             'ajax_url' => admin_url('admin-ajax.php'),
             'nonce'    => wp_create_nonce('gdm_ajax_deploy_nonce'),
@@ -91,7 +91,7 @@ class GDM_Admin {
         }
 
         $package_id = sanitize_text_field(wp_unslash($_POST['package_id'] ?? ''));
-        
+
         if (!$package_id) {
             wp_send_json_error(__('Missing package ID.', 'git-deploy-manager'));
         }
@@ -195,13 +195,17 @@ class GDM_Admin {
             ];
 
             if (!empty($_POST['auto_deploy'])) {
-                $package = $this->packages->find($id);
-                $webhook_url = rest_url('git-deploy-manager/v1/deploy/' . $id);
+                $package        = $this->packages->find($id);
+                $webhook_url    = rest_url('git-deploy-manager/v1/deploy/' . $id);
                 $webhook_secret = $this->settings->get('webhook_secret');
 
-                if ($package && $webhook_secret !== '') {
+                // FIX: Warn the user clearly if no webhook secret has been configured,
+                // instead of silently skipping registration with no feedback.
+                if (empty($webhook_secret)) {
+                    $redirect_args['webhook_no_secret'] = 1;
+                } elseif ($package) {
                     $hook_result = $this->provider->register_webhook($package, $webhook_url, $webhook_secret);
-                    
+
                     if (!empty($hook_result['success'])) {
                         $redirect_args['webhook_created'] = 1;
                     } else {
@@ -209,7 +213,7 @@ class GDM_Admin {
                         $this->logger->add('error', 'Failed to auto-register GitHub webhook.', [
                             'action'         => 'webhook_registration',
                             'package_id'     => $id,
-                            'result_message' => $hook_result['message'] ?? 'Unknown error'
+                            'result_message' => $hook_result['message'] ?? 'Unknown error',
                         ]);
                     }
                 }
@@ -223,9 +227,9 @@ class GDM_Admin {
             GDM_Security::verify_admin_request('gdm_link_package');
 
             $installed_package = sanitize_text_field(wp_unslash($_POST['installed_package'] ?? ''));
-            $parts = explode(':', $installed_package, 2);
-            $package_type = ($parts[0] === 'theme') ? 'theme' : 'plugin';
-            $path = $parts[1] ?? '';
+            $parts             = explode(':', $installed_package, 2);
+            $package_type      = ($parts[0] === 'theme') ? 'theme' : 'plugin';
+            $path              = $parts[1] ?? '';
 
             if ($package_type === 'plugin') {
                 $plugin_file = $path;
@@ -259,13 +263,16 @@ class GDM_Admin {
             ];
 
             if (!empty($_POST['auto_deploy'])) {
-                $package = $this->packages->find($id);
-                $webhook_url = rest_url('git-deploy-manager/v1/deploy/' . $id);
+                $package        = $this->packages->find($id);
+                $webhook_url    = rest_url('git-deploy-manager/v1/deploy/' . $id);
                 $webhook_secret = $this->settings->get('webhook_secret');
 
-                if ($package && $webhook_secret !== '') {
+                // FIX: Same no-secret guard as save_package above.
+                if (empty($webhook_secret)) {
+                    $redirect_args['webhook_no_secret'] = 1;
+                } elseif ($package) {
                     $hook_result = $this->provider->register_webhook($package, $webhook_url, $webhook_secret);
-                    
+
                     if (!empty($hook_result['success'])) {
                         $redirect_args['webhook_created'] = 1;
                     } else {
@@ -273,7 +280,7 @@ class GDM_Admin {
                         $this->logger->add('error', 'Failed to auto-register GitHub webhook during package linking.', [
                             'action'         => 'webhook_registration',
                             'package_id'     => $id,
-                            'result_message' => $hook_result['message'] ?? 'Unknown error'
+                            'result_message' => $hook_result['message'] ?? 'Unknown error',
                         ]);
                     }
                 }
@@ -287,7 +294,7 @@ class GDM_Admin {
             GDM_Security::verify_admin_request('gdm_rollback_package');
 
             $package_id = sanitize_text_field(wp_unslash($_POST['package_id'] ?? ''));
-            $result = $this->deployment_service->rollback($package_id, 'admin');
+            $result     = $this->deployment_service->rollback($package_id, 'admin');
 
             if (!empty($result['success'])) {
                 $this->set_validation_notice('success', $result['message']);
@@ -308,7 +315,7 @@ class GDM_Admin {
             GDM_Security::verify_admin_request('gdm_validate_package');
 
             $package_id = sanitize_text_field(wp_unslash($_POST['package_id'] ?? ''));
-            $package = $this->packages->find($package_id);
+            $package    = $this->packages->find($package_id);
 
             if (!$package) {
                 $this->logger->add('error', 'Package validation failed because the package was not found.', [
@@ -329,7 +336,7 @@ class GDM_Admin {
                 exit;
             }
 
-            $result = $this->provider->validate_package($package);
+            $result  = $this->provider->validate_package($package);
             $message = $result['message'] ?? __('Validation completed.', 'git-deploy-manager');
 
             $this->logger->add(
@@ -391,8 +398,8 @@ class GDM_Admin {
             GDM_Security::verify_admin_request('gdm_deploy_package');
 
             $package_id = sanitize_text_field(wp_unslash($_POST['package_id'] ?? ''));
-            $result = $this->deployment_service->deploy($package_id, 'admin');
-            $flag = !empty($result['success']) ? 'deployed' : 'failed';
+            $result     = $this->deployment_service->deploy($package_id, 'admin');
+            $flag       = !empty($result['success']) ? 'deployed' : 'failed';
 
             wp_safe_redirect(
                 add_query_arg(
@@ -502,6 +509,18 @@ class GDM_Admin {
         if (!empty($_GET['webhook_failed'])) {
             echo '<div class="notice notice-warning is-dismissible"><p>' . esc_html__('Package saved, but GitHub Webhook auto-registration failed. Please check the logs or ensure your GitHub token has "repo" webhook permissions.', 'git-deploy-manager') . '</p></div>';
         }
+
+        // FIX: New notice — shown when auto_deploy is checked but no webhook secret is configured.
+        if (!empty($_GET['webhook_no_secret'])) {
+            $settings_url = add_query_arg(['page' => 'git-deploy-manager-settings'], admin_url('admin.php'));
+            echo '<div class="notice notice-error is-dismissible"><p>'
+                . sprintf(
+                    /* translators: %s Settings page link */
+                    esc_html__('Auto Deploy is enabled, but no Webhook Secret is set. The webhook was NOT registered with GitHub. Please add a Webhook Secret in %s, then re-save this package.', 'git-deploy-manager'),
+                    '<a href="' . esc_url($settings_url) . '">' . esc_html__('Settings', 'git-deploy-manager') . '</a>'
+                )
+                . '</p></div>';
+        }
     }
 
     public function render_packages_page(): void {
@@ -510,10 +529,10 @@ class GDM_Admin {
         }
 
         $all_plugins = get_plugins();
-        $all_themes = wp_get_themes();
+        $all_themes  = wp_get_themes();
 
         $packages = $this->packages->all();
-        $edit_id = sanitize_text_field(wp_unslash($_GET['edit_package'] ?? ''));
+        $edit_id  = sanitize_text_field(wp_unslash($_GET['edit_package'] ?? ''));
 
         $current_package = [
             'id'               => '',
@@ -559,7 +578,7 @@ class GDM_Admin {
                     );
                     ?>
                 </h2>
-                
+
                 <?php if ($has_token && !$is_editing) : ?>
                     <button type="button" class="button button-secondary" id="gdm-fetch-repos-btn" style="margin-bottom: 15px;">
                         <span class="dashicons dashicons-download" style="vertical-align: middle; margin-top: -2px;"></span>
@@ -667,7 +686,7 @@ class GDM_Admin {
                                     value="<?php echo esc_attr($current_package['plugin_slug']); ?>"
                                     required
                                 >
-                                <p class="description"><?php esc_html_e('Target directory inside wp-content/plugins or wp-content/themes.', 'git-deploy-manager'); ?></p>
+                                <p class="description"><?php esc_html_e('Target directory inside wp-content/plugins or wp-content/themes. Must exactly match the folder name (e.g. my-plugin).', 'git-deploy-manager'); ?></p>
                             </td>
                         </tr>
                         <tr>
@@ -713,7 +732,7 @@ class GDM_Admin {
                                     >
                                     <?php esc_html_e('Enable Push to Deploy (Auto-registers Webhook)', 'git-deploy-manager'); ?>
                                 </label>
-                                <p class="description"><?php esc_html_e('When checked and saved, the plugin will attempt to automatically register the webhook URL with GitHub.', 'git-deploy-manager'); ?></p>
+                                <p class="description"><?php esc_html_e('Requires a Webhook Secret to be set in Settings. When checked and saved, the plugin will automatically register the webhook URL with GitHub.', 'git-deploy-manager'); ?></p>
                             </td>
                         </tr>
                     </table>
@@ -767,7 +786,7 @@ class GDM_Admin {
             <div class="gdm-card">
                 <h2><?php esc_html_e('Link Existing Plugin or Theme', 'git-deploy-manager'); ?></h2>
                 <p><?php esc_html_e('Adopt an already installed plugin or theme and manage its future updates via Git Deploy Manager. This will not deploy files immediately; it simply links the local folder to a repository.', 'git-deploy-manager'); ?></p>
-                
+
                 <form method="post">
                     <?php wp_nonce_field('gdm_link_package'); ?>
                     <input type="hidden" name="gdm_action" value="link_package">
@@ -778,7 +797,7 @@ class GDM_Admin {
                             <td>
                                 <select name="installed_package" id="installed_package" required>
                                     <option value=""><?php esc_html_e('-- Select an installed package --', 'git-deploy-manager'); ?></option>
-                                    
+
                                     <optgroup label="<?php esc_attr_e('Plugins', 'git-deploy-manager'); ?>">
                                         <?php foreach ($all_plugins as $path => $plugin_data) : ?>
                                             <option value="plugin:<?php echo esc_attr($path); ?>" data-name="<?php echo esc_attr($plugin_data['Name']); ?>">
@@ -786,7 +805,7 @@ class GDM_Admin {
                                             </option>
                                         <?php endforeach; ?>
                                     </optgroup>
-                                    
+
                                     <optgroup label="<?php esc_attr_e('Themes', 'git-deploy-manager'); ?>">
                                         <?php foreach ($all_themes as $stylesheet => $theme_data) : ?>
                                             <option value="theme:<?php echo esc_attr($stylesheet); ?>" data-name="<?php echo esc_attr($theme_data->get('Name')); ?>">
@@ -836,6 +855,7 @@ class GDM_Admin {
                                     <input name="auto_deploy" id="link_auto_deploy" type="checkbox" value="1">
                                     <?php esc_html_e('Enable Push to Deploy (Auto-registers Webhook)', 'git-deploy-manager'); ?>
                                 </label>
+                                <p class="description"><?php esc_html_e('Requires a Webhook Secret to be set in Settings.', 'git-deploy-manager'); ?></p>
                             </td>
                         </tr>
                     </table>
@@ -899,12 +919,12 @@ class GDM_Admin {
                             );
 
                             $deploy_url = rest_url('git-deploy-manager/v1/deploy/' . $package['id']);
-                            $health = $this->logger->get_package_health($package['id']);
+                            $health     = $this->logger->get_package_health($package['id']);
                             $has_backup = $this->deployment_service->has_backup($package['id']);
                             ?>
                             <tr>
                                 <td>
-                                    <strong class="gdm-text-strong"><?php echo esc_html($package['name']); ?></strong> 
+                                    <strong class="gdm-text-strong"><?php echo esc_html($package['name']); ?></strong>
                                     <span style="font-size: 11px; padding: 2px 6px; border-radius: 4px; background: #e0e0e0; color: #333; margin-left: 6px;">
                                         <?php echo esc_html(ucfirst($package['package_type'])); ?>
                                     </span><br>
@@ -942,7 +962,7 @@ class GDM_Admin {
                                     </div>
                                 </td>
                                 <td>
-                                    <?php 
+                                    <?php
                                     if ($health['status'] === 'healthy') {
                                         $this->render_badge(__('Healthy', 'git-deploy-manager'), 'success');
                                     } elseif ($health['status'] === 'error') {
@@ -975,9 +995,9 @@ class GDM_Admin {
                                             <?php esc_html_e('Edit', 'git-deploy-manager'); ?>
                                         </a>
 
-                                        <button 
-                                            type="button" 
-                                            class="button button-secondary gdm-deploy-btn" 
+                                        <button
+                                            type="button"
+                                            class="button button-secondary gdm-deploy-btn"
                                             data-package="<?php echo esc_attr($package['id']); ?>"
                                         >
                                             <span class="dashicons dashicons-update" style="display: none; vertical-align: middle; margin-top: -2px;"></span>
@@ -993,7 +1013,7 @@ class GDM_Admin {
                                             </form>
                                         <?php endif; ?>
 
-                                        <form method="post" onsubmit="return confirm('<?php echo esc_js(__('Are you sure you want to delete this package?', 'git-deploy-manager')); ?>');">
+                                        <form method="post" onsubmit="return confirm('<?php echo esc_js(__('Are you sure you want to delete this package?', 'git-deploy-manager')); ?>");">
                                             <?php wp_nonce_field('gdm_delete_package'); ?>
                                             <input type="hidden" name="gdm_action" value="delete_package">
                                             <input type="hidden" name="package_id" value="<?php echo esc_attr($package['id']); ?>">
@@ -1075,7 +1095,10 @@ class GDM_Admin {
                                     class="regular-text"
                                     value="<?php echo esc_attr($settings['webhook_secret'] ?? ''); ?>"
                                 >
-                                <p class="description"><?php esc_html_e('Use the same secret value in the GitHub webhook configuration.', 'git-deploy-manager'); ?></p>
+                                <!-- FIX: Clearer description — required for Auto Deploy to work. -->
+                                <p class="description">
+                                    <?php esc_html_e('Required for Auto Deploy (Push to Deploy). Set a strong random string here, and use the exact same value in your GitHub repository webhook configuration. Without this, webhooks will not be registered or accepted.', 'git-deploy-manager'); ?>
+                                </p>
                             </td>
                         </tr>
                     </table>
@@ -1149,18 +1172,18 @@ class GDM_Admin {
                             );
 
                             $repo_owner = $this->get_log_context_value($context, 'repo_owner', '');
-                            $repo_name = $this->get_log_context_value($context, 'repo_name', '');
+                            $repo_name  = $this->get_log_context_value($context, 'repo_name', '');
                             $repository = ($repo_owner !== '' && $repo_name !== '')
                                 ? $repo_owner . '/' . $repo_name
                                 : '—';
 
                             $branch = $this->get_log_context_value($context, 'branch', '—');
-                            $event = $this->format_log_label(
+                            $event  = $this->format_log_label(
                                 $this->get_log_context_value($context, 'action', (string) ($log['message'] ?? 'log'))
                             );
                             $source = $this->format_log_label($this->get_log_context_value($context, 'source', '—'));
                             $status = $this->format_log_label($this->get_log_context_value($context, 'status', '—'));
-                            $level = strtolower((string) ($log['level'] ?? 'info'));
+                            $level  = strtolower((string) ($log['level'] ?? 'info'));
                             ?>
                             <tr>
                                 <td><strong class="gdm-text-strong"><?php echo esc_html((string) ($log['time'] ?? '')); ?></strong></td>
@@ -1292,7 +1315,7 @@ class GDM_Admin {
     }
 
     private function render_log_details(array $log): void {
-        $context = $this->get_log_context($log);
+        $context         = $this->get_log_context($log);
         $preferred_order = [
             'result_message',
             'package_id',
