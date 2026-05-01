@@ -154,6 +154,9 @@ class GDM_Deployment_Service {
         }
 
         $target_main_file = trailingslashit($target_dir) . $expected_main_filename;
+
+        // FIX: Determine mode BEFORE any filesystem changes occur.
+        // Use file_exists on the live target to accurately detect install vs upgrade.
         $mode = file_exists($target_main_file) ? 'upgrade' : 'install';
 
         $tmp_zip = $this->download_archive($archive_url);
@@ -239,7 +242,9 @@ class GDM_Deployment_Service {
 
         // Zero-Downtime Swap Logic with Retained Backup
         $target_exists = $wp_filesystem->exists($target_dir);
-        $backup_dir = ($package_type === 'theme' ? trailingslashit(get_theme_root()) : trailingslashit(WP_PLUGIN_DIR)) . $package_slug . '-gdm-bak';
+        $backup_dir    = ($package_type === 'theme'
+            ? trailingslashit(get_theme_root())
+            : trailingslashit(WP_PLUGIN_DIR)) . $package_slug . '-gdm-bak';
 
         if ($target_exists) {
             // Delete previous backup if it exists
@@ -250,17 +255,25 @@ class GDM_Deployment_Service {
             $wp_filesystem->move($target_dir, $backup_dir, true);
         }
 
-        // Move the newly extracted directory into the live position
+        // FIX: After backing up (or if no prior install exists), $target_dir
+        // no longer exists on disk. We can now safely move the extracted source
+        // folder directly into $target_dir without risk of it being placed
+        // *inside* an existing folder — which was the root cause of the
+        // duplicate plugin folder being created.
         $moved = $wp_filesystem->move($source_plugin_dir, $target_dir, true);
 
-        // Fallback for cross-partition issues where move() might fail
+        // Fallback for cross-partition issues where move() might still fail
         if (!$moved) {
+            if (!$wp_filesystem->exists($target_dir)) {
+                $wp_filesystem->mkdir($target_dir, FS_CHMOD_DIR);
+            }
+
             $copied = copy_dir($source_plugin_dir, $target_dir);
-            
+
             if (is_wp_error($copied)) {
-                // AUTOMATIC ROLLBACK: If moving/copying fails, restore the backup instantly
+                // AUTOMATIC ROLLBACK: restore the backup if copy also fails
                 if ($target_exists) {
-                    $wp_filesystem->delete($target_dir, true); // Remove any partial copy
+                    $wp_filesystem->delete($target_dir, true);
                     $wp_filesystem->move($backup_dir, $target_dir, true);
                 }
                 $this->cleanup_path($working_dir);
@@ -272,9 +285,10 @@ class GDM_Deployment_Service {
             }
         }
 
-        // Clean up temporary extraction folder. We NO LONGER delete the $backup_dir here so users can roll back.
+        // Clean up temporary extraction folder.
+        // We intentionally keep $backup_dir so users can roll back manually.
         $this->cleanup_path($working_dir);
-        
+
         if ($package_type === 'theme') {
             wp_clean_themes_cache();
         } else {
@@ -311,7 +325,10 @@ class GDM_Deployment_Service {
             return false;
         }
 
-        $backup_dir = ($package_type === 'theme' ? trailingslashit(get_theme_root()) : trailingslashit(WP_PLUGIN_DIR)) . $package_slug . '-gdm-bak';
+        $backup_dir = ($package_type === 'theme'
+            ? trailingslashit(get_theme_root())
+            : trailingslashit(WP_PLUGIN_DIR)) . $package_slug . '-gdm-bak';
+
         return file_exists($backup_dir);
     }
 
@@ -327,8 +344,10 @@ class GDM_Deployment_Service {
 
         $package_type = $package['package_type'] ?? 'plugin';
         $package_slug = sanitize_title((string) ($package['plugin_slug'] ?? ''));
-        $base_dir = $package_type === 'theme' ? trailingslashit(get_theme_root()) : trailingslashit(WP_PLUGIN_DIR);
-        
+        $base_dir     = $package_type === 'theme'
+            ? trailingslashit(get_theme_root())
+            : trailingslashit(WP_PLUGIN_DIR);
+
         $target_dir = $base_dir . $package_slug;
         $backup_dir = $base_dir . $package_slug . '-gdm-bak';
 
@@ -402,7 +421,7 @@ class GDM_Deployment_Service {
 
     private function get_request_headers(): array {
         $settings = get_option('gdm_settings', []);
-        $token = is_array($settings) ? ($settings['github_token'] ?? '') : '';
+        $token    = is_array($settings) ? ($settings['github_token'] ?? '') : '';
 
         $headers = [
             'Accept'     => 'application/vnd.github+json',
