@@ -154,7 +154,6 @@ class GDM_Deployment_Service {
         }
 
         $target_main_file = trailingslashit($target_dir) . $expected_main_filename;
-        // Determine mode BEFORE any file operations so we know if this is an upgrade or fresh install.
         $mode = file_exists($target_main_file) ? 'upgrade' : 'install';
 
         $tmp_zip = $this->download_archive($archive_url);
@@ -251,21 +250,13 @@ class GDM_Deployment_Service {
             $wp_filesystem->move($target_dir, $backup_dir, true);
         }
 
-        // FIX: Ensure $target_dir does not exist before moving the new source into it.
-        // WP_Filesystem::move() behaviour varies by adapter — when the destination already
-        // exists it may move the source *into* the destination (creating a nested copy) instead
-        // of replacing it. Removing the destination first guarantees a clean rename/move.
-        if ($wp_filesystem->exists($target_dir)) {
-            $wp_filesystem->delete($target_dir, true);
-        }
-
         // Move the newly extracted directory into the live position
         $moved = $wp_filesystem->move($source_plugin_dir, $target_dir, true);
 
         // Fallback for cross-partition issues where move() might fail
         if (!$moved) {
             $copied = copy_dir($source_plugin_dir, $target_dir);
-
+            
             if (is_wp_error($copied)) {
                 // AUTOMATIC ROLLBACK: If moving/copying fails, restore the backup instantly
                 if ($target_exists) {
@@ -283,7 +274,7 @@ class GDM_Deployment_Service {
 
         // Clean up temporary extraction folder. We NO LONGER delete the $backup_dir here so users can roll back.
         $this->cleanup_path($working_dir);
-
+        
         if ($package_type === 'theme') {
             wp_clean_themes_cache();
         } else {
@@ -337,7 +328,7 @@ class GDM_Deployment_Service {
         $package_type = $package['package_type'] ?? 'plugin';
         $package_slug = sanitize_title((string) ($package['plugin_slug'] ?? ''));
         $base_dir = $package_type === 'theme' ? trailingslashit(get_theme_root()) : trailingslashit(WP_PLUGIN_DIR);
-
+        
         $target_dir = $base_dir . $package_slug;
         $backup_dir = $base_dir . $package_slug . '-gdm-bak';
 
