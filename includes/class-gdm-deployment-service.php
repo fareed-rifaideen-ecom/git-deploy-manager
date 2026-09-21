@@ -155,8 +155,7 @@ class GDM_Deployment_Service {
 
         $target_main_file = trailingslashit($target_dir) . $expected_main_filename;
 
-        // FIX: Determine mode BEFORE any filesystem changes occur.
-        // Use file_exists on the live target to accurately detect install vs upgrade.
+        // Determine mode BEFORE any filesystem changes occur.
         $mode = file_exists($target_main_file) ? 'upgrade' : 'install';
 
         $tmp_zip = $this->download_archive($archive_url);
@@ -240,11 +239,14 @@ class GDM_Deployment_Service {
 
         global $wp_filesystem;
 
-        // Zero-Downtime Swap Logic with Retained Backup
+        // Zero-Downtime Swap Logic with Retained Backup outside of plugins directory
         $target_exists = $wp_filesystem->exists($target_dir);
-        $backup_dir    = ($package_type === 'theme'
-            ? trailingslashit(get_theme_root())
-            : trailingslashit(WP_PLUGIN_DIR)) . $package_slug . '-gdm-bak';
+        
+        $backup_base = trailingslashit(WP_CONTENT_DIR) . 'gdm-backups/';
+        if (!$wp_filesystem->exists($backup_base)) {
+            $wp_filesystem->mkdir($backup_base, FS_CHMOD_DIR);
+        }
+        $backup_dir = $backup_base . $package_slug;
 
         if ($target_exists) {
             // Delete previous backup if it exists
@@ -255,11 +257,6 @@ class GDM_Deployment_Service {
             $wp_filesystem->move($target_dir, $backup_dir, true);
         }
 
-        // FIX: After backing up (or if no prior install exists), $target_dir
-        // no longer exists on disk. We can now safely move the extracted source
-        // folder directly into $target_dir without risk of it being placed
-        // *inside* an existing folder — which was the root cause of the
-        // duplicate plugin folder being created.
         $moved = $wp_filesystem->move($source_plugin_dir, $target_dir, true);
 
         // Fallback for cross-partition issues where move() might still fail
@@ -286,7 +283,6 @@ class GDM_Deployment_Service {
         }
 
         // Clean up temporary extraction folder.
-        // We intentionally keep $backup_dir so users can roll back manually.
         $this->cleanup_path($working_dir);
 
         if ($package_type === 'theme') {
@@ -318,16 +314,14 @@ class GDM_Deployment_Service {
             return false;
         }
 
-        $package_type = $package['package_type'] ?? 'plugin';
         $package_slug = sanitize_title((string) ($package['plugin_slug'] ?? ''));
 
         if ($package_slug === '') {
             return false;
         }
 
-        $backup_dir = ($package_type === 'theme'
-            ? trailingslashit(get_theme_root())
-            : trailingslashit(WP_PLUGIN_DIR)) . $package_slug . '-gdm-bak';
+        // Check backup location outside plugins directory
+        $backup_dir = trailingslashit(WP_CONTENT_DIR) . 'gdm-backups/' . $package_slug;
 
         return file_exists($backup_dir);
     }
@@ -349,7 +343,7 @@ class GDM_Deployment_Service {
             : trailingslashit(WP_PLUGIN_DIR);
 
         $target_dir = $base_dir . $package_slug;
-        $backup_dir = $base_dir . $package_slug . '-gdm-bak';
+        $backup_dir = trailingslashit(WP_CONTENT_DIR) . 'gdm-backups/' . $package_slug;
 
         if (!file_exists($backup_dir)) {
             return ['success' => false, 'message' => 'No backup available for rollback.'];
@@ -440,6 +434,11 @@ class GDM_Deployment_Service {
 
         if (!function_exists('WP_Filesystem')) {
             require_once ABSPATH . 'wp-admin/includes/file.php';
+        }
+
+        // FIX: Force direct filesystem access to prevent the HTML credentials prompt during headless deployments.
+        if (!defined('FS_METHOD')) {
+            define('FS_METHOD', 'direct');
         }
 
         WP_Filesystem();
