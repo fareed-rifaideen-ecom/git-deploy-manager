@@ -130,11 +130,15 @@ class GDM_GitHub_Provider {
     }
 
     public function get_latest_commit(string $owner, string $repo, string $branch = 'main'): array {
+        $owner  = sanitize_text_field(trim($owner));
+        $repo   = sanitize_text_field(trim($repo));
+        $branch = trim(sanitize_text_field($branch), '/');
+
         $url = sprintf(
             'https://api.github.com/repos/%s/%s/commits/%s',
-            rawurlencode($owner),
-            rawurlencode($repo),
-            rawurlencode($branch)
+            $owner,
+            $repo,
+            $branch
         );
 
         $response = wp_remote_get($url, [
@@ -161,11 +165,15 @@ class GDM_GitHub_Provider {
     }
 
     public function get_archive_url(string $owner, string $repo, string $branch = 'main'): string {
+        $owner  = sanitize_text_field(trim($owner));
+        $repo   = sanitize_text_field(trim($repo));
+        $branch = trim(sanitize_text_field($branch), '/');
+
         return sprintf(
             'https://api.github.com/repos/%s/%s/zipball/%s',
-            rawurlencode($owner),
-            rawurlencode($repo),
-            rawurlencode($branch)
+            $owner,
+            $repo,
+            $branch
         );
     }
 
