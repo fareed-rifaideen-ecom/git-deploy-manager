@@ -186,6 +186,11 @@ class GDM_Webhook_Controller {
             'repository'  => $repository,
         ]);
 
+        // FIX: Force direct filesystem access to prevent the HTML credentials prompt during headless REST API requests.
+        if (!defined('FS_METHOD')) {
+            define('FS_METHOD', 'direct');
+        }
+
         $result = $this->deployment_service->deploy($package_id);
         $status = !empty($result['success']) ? 200 : 500;
 
