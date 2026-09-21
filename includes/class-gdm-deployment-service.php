@@ -145,6 +145,16 @@ class GDM_Deployment_Service {
             ];
         }
 
+        // FIX: Initialize filesystem BEFORE downloading or unzipping
+        if (!$this->prepare_filesystem()) {
+            return [
+                'success' => false,
+                'message' => 'Could not initialize the WordPress filesystem API.',
+            ];
+        }
+
+        global $wp_filesystem;
+
         if ($package_type === 'theme') {
             $expected_main_filename = 'style.css';
             $target_dir = trailingslashit(get_theme_root()) . $package_slug;
@@ -227,17 +237,6 @@ class GDM_Deployment_Service {
         }
 
         $source_plugin_dir = dirname($package_main_source);
-
-        if (!$this->prepare_filesystem()) {
-            $this->cleanup_path($working_dir);
-
-            return [
-                'success' => false,
-                'message' => 'Could not initialize the WordPress filesystem API.',
-            ];
-        }
-
-        global $wp_filesystem;
 
         // Zero-Downtime Swap Logic with Retained Backup outside of plugins directory
         $target_exists = $wp_filesystem->exists($target_dir);
